@@ -177,32 +177,82 @@ function updateFormatterMeta() {
 }
 
 function escapeText(text) {
-  return text
-    .replaceAll("\\", "\\\\")
-    .replaceAll('"', '\\"')
-    .replaceAll("\r", "\\r")
-    .replaceAll("\n", "\\n")
-    .replaceAll("\t", "\\t")
-    .replaceAll("\b", "\\b")
-    .replaceAll("\f", "\\f");
+  // JSON.stringify implements all standard JSON string escapes.
+  return JSON.stringify(text).slice(1, -1);
 }
 
 function unescapeText(text) {
-  const escapeMap = {
-    '"': '"',
-    "'": "'",
-    "\\": "\\",
-    "/": "/",
-    "b": "\b",
-    "f": "\f",
-    "n": "\n",
-    "r": "\r",
-    "t": "\t"
-  };
+  let result = "";
 
-  return text
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-    .replace(/\\(["'\\/bfnrt])/g, (_, character) => escapeMap[character]);
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+
+    if (character !== "\\") {
+      result += character;
+      continue;
+    }
+
+    if (index === text.length - 1) {
+      result += "\\";
+      continue;
+    }
+
+    const escaped = text[index + 1];
+
+    switch (escaped) {
+      case "b":
+        result += "\b";
+        index += 1;
+        break;
+      case "f":
+        result += "\f";
+        index += 1;
+        break;
+      case "n":
+        result += "\n";
+        index += 1;
+        break;
+      case "r":
+        result += "\r";
+        index += 1;
+        break;
+      case "t":
+        result += "\t";
+        index += 1;
+        break;
+      case '"':
+        result += '"';
+        index += 1;
+        break;
+      case "\\":
+        result += "\\";
+        index += 1;
+        break;
+      case "/":
+        result += "/";
+        index += 1;
+        break;
+      case "u": {
+        const hex = text.slice(index + 2, index + 6);
+
+        if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+          result += String.fromCharCode(Number.parseInt(hex, 16));
+          index += 5;
+        } else {
+          result += "\\u";
+          index += 1;
+        }
+        break;
+      }
+      default:
+        // Unknown sequences such as \x are preserved unchanged.
+        result += `\\${escaped}`;
+        index += 1;
+        break;
+    }
+  }
+
+  return result;
 }
 
 function escapeAction(action) {
@@ -211,6 +261,9 @@ function escapeAction(action) {
 
   if (action === "clear") {
     input.value = "";
+    output.value = "";
+  } else if (action === "sample") {
+    input.value = "First line\nSecond line\tTabbed\nQuote: \"Hello\"\nPath: C:\\Tools\\json";
     output.value = "";
   } else if (action === "swap") {
     [input.value, output.value] = [output.value, input.value];
@@ -235,11 +288,19 @@ function escapeAction(action) {
     output.value = JSON.stringify(input.value);
   } else if (action === "unescape") {
     try {
-      const candidate = input.value.trim();
+      const rawValue = input.value;
+      const candidate = rawValue.trim();
+
       if (candidate.startsWith('"') && candidate.endsWith('"')) {
-        output.value = JSON.parse(candidate);
+        const parsed = JSON.parse(candidate);
+
+        if (typeof parsed !== "string") {
+          throw new Error("The quoted value is not a JSON string.");
+        }
+
+        output.value = parsed;
       } else {
-        output.value = unescapeText(candidate);
+        output.value = unescapeText(rawValue);
       }
     } catch (error) {
       output.value = `Error: ${error.message}`;

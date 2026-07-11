@@ -119,10 +119,30 @@
           </article>
         </div>
 
-        <div class="hint-row">
-          <span><strong>Escape:</strong> converts quotes, line breaks, tabs and backslashes.</span>
-          <span><strong>Unescape:</strong> converts escaped sequences back to readable text.</span>
-        </div>
+        <section class="escape-reference">
+          <div class="escape-reference-heading">
+            <div>
+              <strong>Escape reference</strong>
+              <span>Standard JSON string replacements</span>
+            </div>
+            <button class="mini-action" type="button" data-escape-action="sample">Load example</button>
+          </div>
+
+          <div class="escape-reference-grid">
+            <div><code>\b</code><span>Backspace</span></div>
+            <div><code>\f</code><span>Form feed</span></div>
+            <div><code>\n</code><span>Newline</span></div>
+            <div><code>\r</code><span>Carriage return</span></div>
+            <div><code>\t</code><span>Tab</span></div>
+            <div><code>\"</code><span>Double quote</span></div>
+            <div><code>\\</code><span>Backslash</span></div>
+            <div><code>\uXXXX</code><span>Unicode/control character</span></div>
+          </div>
+
+          <p class="escape-note">
+            Escape and Unescape are exact opposites. JSON string literal also adds the surrounding double quotes.
+          </p>
+        </section>
       </section>
 
       <section class="tool-panel" id="compare-panel">
