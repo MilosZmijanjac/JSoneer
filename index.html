@@ -140,7 +140,7 @@
           </div>
 
           <p class="escape-note">
-            Escape and Unescape are exact opposites. JSON string literal also adds the surrounding double quotes.
+            Unescape is tolerant: valid sequences are decoded, while unknown sequences such as <code>\p</code> or <code>\T</code> are preserved. Strict JSON validation remains available in Formatter.
           </p>
         </section>
       </section>

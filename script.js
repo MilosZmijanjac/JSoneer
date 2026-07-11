@@ -287,23 +287,16 @@ function escapeAction(action) {
   } else if (action === "stringify") {
     output.value = JSON.stringify(input.value);
   } else if (action === "unescape") {
-    try {
-      const rawValue = input.value;
-      const candidate = rawValue.trim();
+    const rawValue = input.value;
+    const trimmedValue = rawValue.trim();
 
-      if (candidate.startsWith('"') && candidate.endsWith('"')) {
-        const parsed = JSON.parse(candidate);
-
-        if (typeof parsed !== "string") {
-          throw new Error("The quoted value is not a JSON string.");
-        }
-
-        output.value = parsed;
-      } else {
-        output.value = unescapeText(rawValue);
-      }
-    } catch (error) {
-      output.value = `Error: ${error.message}`;
+    // Unescape is intentionally tolerant. A fully quoted value has only its
+    // outer quotes removed; supported escape sequences are decoded and
+    // unknown sequences such as \p or \T are preserved instead of throwing.
+    if (trimmedValue.length >= 2 && trimmedValue.startsWith('"') && trimmedValue.endsWith('"')) {
+      output.value = unescapeText(trimmedValue.slice(1, -1));
+    } else {
+      output.value = unescapeText(rawValue);
     }
   }
 
