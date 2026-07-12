@@ -255,6 +255,171 @@ function unescapeText(text) {
   return result;
 }
 
+function decodeEscapedJsonLayer(text) {
+  let value = text.trim();
+
+  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+    value = value.slice(1, -1);
+  }
+
+  let result = "";
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+
+    if (character !== "\\" || index === value.length - 1) {
+      result += character;
+      continue;
+    }
+
+    const next = value[index + 1];
+
+    // Decode only the wrapper layer. Keep \n, \t, \r, \uXXXX, and unknown
+    // sequences intact so JSON.parse receives valid JSON escape text.
+    if (next === '"') {
+      result += '"';
+      index += 1;
+    } else if (next === "\\") {
+      result += "\\";
+      index += 1;
+    } else if (next === "/") {
+      result += "/";
+      index += 1;
+    } else {
+      result += `\\${next}`;
+      index += 1;
+    }
+  }
+
+  return result;
+}
+
+function repairJsonText(text, aggressive = false) {
+  let result = "";
+  let insideString = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+
+    if (!insideString) {
+      result += character;
+
+      if (character === '"') {
+        insideString = true;
+      }
+
+      continue;
+    }
+
+    if (character === '"') {
+      result += character;
+      insideString = false;
+      continue;
+    }
+
+    const code = character.charCodeAt(0);
+
+    if (code <= 0x1f) {
+      const escapedControlCharacters = {
+        8: "\\b",
+        9: "\\t",
+        10: "\\n",
+        12: "\\f",
+        13: "\\r"
+      };
+
+      result += escapedControlCharacters[code] ?? `\\u${code.toString(16).padStart(4, "0")}`;
+      continue;
+    }
+
+    if (character !== "\\") {
+      result += character;
+      continue;
+    }
+
+    const next = text[index + 1];
+
+    if (next === undefined) {
+      result += "\\\\";
+      continue;
+    }
+
+    if (next === '"' || next === "\\" || next === "/") {
+      result += `\\${next}`;
+      index += 1;
+      continue;
+    }
+
+    if (next === "u") {
+      const hex = text.slice(index + 2, index + 6);
+
+      if (/^[0-9a-fA-F]{4}$/.test(hex)) {
+        result += `\\u${hex}`;
+        index += 5;
+      } else {
+        result += "\\\\u";
+        index += 1;
+      }
+
+      continue;
+    }
+
+    const isStandardEscape = ["b", "f", "n", "r", "t"].includes(next);
+
+    if (isStandardEscape && !aggressive) {
+      result += `\\${next}`;
+      index += 1;
+      continue;
+    }
+
+    // Invalid or suspicious single backslash: preserve it as literal text.
+    result += `\\\\${next}`;
+    index += 1;
+  }
+
+  return result;
+}
+
+function parseJsonWithRepairs(text) {
+  const variants = [
+    text,
+    repairJsonText(text, false),
+    repairJsonText(text, true)
+  ];
+
+  let lastError = null;
+
+  for (const variant of [...new Set(variants)]) {
+    try {
+      return JSON.parse(variant);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError ?? new Error("Invalid JSON.");
+}
+
+function tryParseJsonDocument(candidate) {
+  let parsed = parseJsonWithRepairs(candidate);
+
+  for (let depth = 0; depth < 4 && typeof parsed === "string"; depth += 1) {
+    const nested = parsed.trim();
+
+    if (!(nested.startsWith("{") || nested.startsWith("["))) {
+      break;
+    }
+
+    parsed = parseJsonWithRepairs(nested);
+  }
+
+  if (typeof parsed === "string") {
+    throw new Error("The value is text, not a JSON object or array.");
+  }
+
+  return parsed;
+}
+
 function parseQuickFormatJson(text) {
   const rawValue = text.trim();
 
@@ -262,42 +427,25 @@ function parseQuickFormatJson(text) {
     throw new Error("There is no JSON to format.");
   }
 
-  const attempts = [];
+  const candidates = new Set();
+  candidates.add(rawValue);
 
-  // First try normal JSON.
-  attempts.push(rawValue);
+  let decoded = rawValue;
 
-  // Then try tolerant unescaping, useful for copied log/API values.
-  const withoutOuterQuotes =
-    rawValue.length >= 2 && rawValue.startsWith('"') && rawValue.endsWith('"')
-      ? rawValue.slice(1, -1)
-      : rawValue;
-
-  const unescapedValue = unescapeText(withoutOuterQuotes);
-  if (unescapedValue !== rawValue) {
-    attempts.push(unescapedValue);
+  // Add several wrapper-decoded forms because copied logs can be escaped
+  // more than once.
+  for (let depth = 0; depth < 4; depth += 1) {
+    decoded = decodeEscapedJsonLayer(decoded);
+    candidates.add(decoded);
   }
 
   let lastError = null;
 
-  for (const candidate of [...new Set(attempts)]) {
+  for (const candidate of candidates) {
+    if (!candidate.trim()) continue;
+
     try {
-      let parsed = JSON.parse(candidate);
-
-      // Handle a JSON string whose content is another JSON document.
-      if (typeof parsed === "string") {
-        try {
-          parsed = JSON.parse(parsed);
-        } catch {
-          // It is a valid plain string, but not a document that can be formatted.
-        }
-      }
-
-      if (typeof parsed === "string") {
-        throw new Error("The value is a string, not a JSON object or array.");
-      }
-
-      return parsed;
+      return tryParseJsonDocument(candidate);
     } catch (error) {
       lastError = error;
     }
@@ -341,7 +489,8 @@ function escapeAction(action) {
       output.value = JSON.stringify(parsed, null, 2);
       showToast("JSON formatted in output");
     } catch (error) {
-      showToast(`Cannot format: ${error.message}`);
+      output.value = `Format error: ${error.message}`;
+      showToast("Could not format this value");
     }
   } else if (action === "escape") {
     output.value = escapeText(input.value);
