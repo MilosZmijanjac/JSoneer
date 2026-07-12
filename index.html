@@ -113,7 +113,10 @@
           <article class="editor-card">
             <div class="editor-heading">
               <div><strong>Output</strong><span id="escape-output-meta">Waiting for input</span></div>
-              <button class="mini-action" type="button" data-escape-action="copy">Copy</button>
+              <div class="heading-actions">
+                <button class="mini-action quick-format-action" type="button" data-escape-action="quick-format">Quick format</button>
+                <button class="mini-action" type="button" data-escape-action="copy">Copy</button>
+              </div>
             </div>
             <textarea id="escape-output" spellcheck="false" readonly placeholder="Result will appear here…"></textarea>
           </article>

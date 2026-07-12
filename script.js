@@ -255,6 +255,57 @@ function unescapeText(text) {
   return result;
 }
 
+function parseQuickFormatJson(text) {
+  const rawValue = text.trim();
+
+  if (!rawValue) {
+    throw new Error("There is no JSON to format.");
+  }
+
+  const attempts = [];
+
+  // First try normal JSON.
+  attempts.push(rawValue);
+
+  // Then try tolerant unescaping, useful for copied log/API values.
+  const withoutOuterQuotes =
+    rawValue.length >= 2 && rawValue.startsWith('"') && rawValue.endsWith('"')
+      ? rawValue.slice(1, -1)
+      : rawValue;
+
+  const unescapedValue = unescapeText(withoutOuterQuotes);
+  if (unescapedValue !== rawValue) {
+    attempts.push(unescapedValue);
+  }
+
+  let lastError = null;
+
+  for (const candidate of [...new Set(attempts)]) {
+    try {
+      let parsed = JSON.parse(candidate);
+
+      // Handle a JSON string whose content is another JSON document.
+      if (typeof parsed === "string") {
+        try {
+          parsed = JSON.parse(parsed);
+        } catch {
+          // It is a valid plain string, but not a document that can be formatted.
+        }
+      }
+
+      if (typeof parsed === "string") {
+        throw new Error("The value is a string, not a JSON object or array.");
+      }
+
+      return parsed;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError ?? new Error("Invalid JSON.");
+}
+
 function escapeAction(action) {
   const input = $("#escape-input");
   const output = $("#escape-output");
@@ -282,6 +333,16 @@ function escapeAction(action) {
       .then(() => showToast("Copied output"))
       .catch(() => showToast("Copy failed"));
     return;
+  } else if (action === "quick-format") {
+    const sourceValue = output.value.trim() ? output.value : input.value;
+
+    try {
+      const parsed = parseQuickFormatJson(sourceValue);
+      output.value = JSON.stringify(parsed, null, 2);
+      showToast("JSON formatted in output");
+    } catch (error) {
+      showToast(`Cannot format: ${error.message}`);
+    }
   } else if (action === "escape") {
     output.value = escapeText(input.value);
   } else if (action === "stringify") {
