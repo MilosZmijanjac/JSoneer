@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Private browser-based JSON formatter, escaper, unescaper, validator, sorter and deep comparison tool." />
+  <meta
+    name="description"
+    content="Private browser-based JSON formatter, escaper, unescaper, validator, sorter, deep comparison and local history tool."
+  />
   <meta name="theme-color" content="#080c18" />
   <title>JSON Tools</title>
   <link rel="stylesheet" href="style.css" />
@@ -14,7 +17,7 @@
   <div class="glow glow-right" aria-hidden="true"></div>
 
   <header class="topbar">
-    <a class="brand" href="#">
+    <a class="brand" href="#" aria-label="JSON Tools home">
       <span class="brand-icon">{ }</span>
       <span>JSON Tools</span>
     </a>
@@ -25,7 +28,7 @@
     <section class="hero">
       <p class="eyebrow">FAST · PRIVATE · NO UPLOADS</p>
       <h1>JSON without the headache.</h1>
-      <p>Format, escape, validate, sort and compare JSON directly in your browser.</p>
+      <p>Format, escape, validate, sort, compare and revisit recent results directly in your browser.</p>
     </section>
 
     <section class="app-shell">
@@ -41,6 +44,11 @@
         <button class="tab" type="button" data-tab="compare">
           <span class="tab-icon">≠</span>
           Compare
+        </button>
+        <button class="tab" type="button" data-tab="history">
+          <span class="tab-icon">↺</span>
+          History
+          <span class="tab-count" id="history-tab-count">0</span>
         </button>
       </nav>
 
@@ -64,7 +72,7 @@
               <div><strong>Input</strong><span id="format-input-meta">0 characters</span></div>
               <button class="mini-action" type="button" data-format-action="paste">Paste</button>
             </div>
-            <textarea id="format-input" spellcheck="false" placeholder='Paste JSON here…'></textarea>
+            <textarea id="format-input" spellcheck="false" placeholder="Paste JSON here…"></textarea>
           </article>
 
           <article class="editor-card">
@@ -144,7 +152,8 @@
           </div>
 
           <p class="escape-note">
-            Unescape is tolerant: valid sequences are decoded, while unknown sequences such as <code>\p</code> or <code>\T</code> are preserved. Strict JSON validation remains available in Formatter.
+            Unescape is tolerant: valid sequences are decoded, while unknown sequences such as
+            <code>\p</code> or <code>\T</code> are preserved. Strict JSON validation remains available in Formatter.
           </p>
         </section>
       </section>
@@ -178,7 +187,7 @@
               <div><strong>Left JSON</strong><span id="left-meta">0 characters</span></div>
               <button class="mini-action" type="button" data-compare-action="left-sample">Sample</button>
             </div>
-            <textarea id="left-json" spellcheck="false" placeholder='Paste first JSON document…'></textarea>
+            <textarea id="left-json" spellcheck="false" placeholder="Paste first JSON document…"></textarea>
           </article>
 
           <article class="editor-card">
@@ -186,7 +195,7 @@
               <div><strong>Right JSON</strong><span id="right-meta">0 characters</span></div>
               <button class="mini-action" type="button" data-compare-action="right-sample">Sample</button>
             </div>
-            <textarea id="right-json" spellcheck="false" placeholder='Paste second JSON document…'></textarea>
+            <textarea id="right-json" spellcheck="false" placeholder="Paste second JSON document…"></textarea>
           </article>
         </div>
 
@@ -200,18 +209,9 @@
           </div>
 
           <div class="summary-cards">
-            <div class="summary-card">
-              <span>Changed</span>
-              <strong id="changed-count">0</strong>
-            </div>
-            <div class="summary-card">
-              <span>Only left</span>
-              <strong id="left-only-count">0</strong>
-            </div>
-            <div class="summary-card">
-              <span>Only right</span>
-              <strong id="right-only-count">0</strong>
-            </div>
+            <div class="summary-card"><span>Changed</span><strong id="changed-count">0</strong></div>
+            <div class="summary-card"><span>Only left</span><strong id="left-only-count">0</strong></div>
+            <div class="summary-card"><span>Only right</span><strong id="right-only-count">0</strong></div>
           </div>
 
           <div id="diff-list" class="diff-list">
@@ -219,11 +219,25 @@
           </div>
         </section>
       </section>
+
+      <section class="tool-panel" id="history-panel">
+        <div class="history-header">
+          <div>
+            <strong>Recent results</strong>
+            <span id="history-count">0 of 20 saved locally</span>
+          </div>
+          <button class="action quiet danger" id="clear-history" type="button">Clear history</button>
+        </div>
+
+        <div class="history-list" id="history-list">
+          <div class="empty-state">No history yet. Successful results will appear here.</div>
+        </div>
+      </section>
     </section>
 
     <section class="feature-row">
       <div><strong>Private</strong><span>Everything stays in your browser.</span></div>
-      <div><strong>Useful</strong><span>Deep comparison with key-based array matching.</span></div>
+      <div><strong>Useful</strong><span>Restore, copy or remove your last 20 results.</span></div>
       <div><strong>Portable</strong><span>Plain HTML, CSS and JavaScript.</span></div>
     </section>
   </main>

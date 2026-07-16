@@ -1,10 +1,14 @@
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
+const HISTORY_STORAGE_KEY = "jsoneer.history.v1";
+const HISTORY_LIMIT = 20;
+
 const state = {
   formattedText: "",
   comparisonText: "",
-  toastTimer: null
+  toastTimer: null,
+  suppressHistory: false
 };
 
 function showToast(message) {
@@ -33,22 +37,27 @@ function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function syntaxHighlight(json) {
   const escaped = escapeHtml(json);
+
   return escaped.replace(
-    /("(\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"\s*:|"(\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)/g,
+    /(&quot;(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\])*?&quot;\s*:|&quot;(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\])*?&quot;|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)/g,
     (match) => {
       let className = "json-number";
-      if (match.startsWith('"')) {
+
+      if (match.startsWith("&quot;")) {
         className = /:\s*$/.test(match) ? "json-key" : "json-string";
       } else if (match === "true" || match === "false") {
         className = "json-boolean";
       } else if (match === "null") {
         className = "json-null";
       }
+
       return `<span class="${className}">${match}</span>`;
     }
   );
@@ -56,6 +65,7 @@ function syntaxHighlight(json) {
 
 function sortDeep(value) {
   if (Array.isArray(value)) return value.map(sortDeep);
+
   if (value && typeof value === "object") {
     return Object.keys(value)
       .sort((a, b) => a.localeCompare(b))
@@ -64,12 +74,18 @@ function sortDeep(value) {
         return result;
       }, {});
   }
+
   return value;
 }
 
 function parseJsonInput(input) {
   if (!input.trim()) throw new Error("Paste JSON first.");
   return JSON.parse(input);
+}
+
+function activateTab(tabName) {
+  $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === tabName));
+  $$(".tool-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `${tabName}-panel`));
 }
 
 function setFormatStatus(message, status = "idle", value = null, output = "") {
@@ -79,11 +95,18 @@ function setFormatStatus(message, status = "idle", value = null, output = "") {
   $("#format-size").textContent = byteSize(output);
 }
 
-function renderFormatOutput(text, value, message) {
+function renderFormatOutput(text, value, message, historyAction) {
   state.formattedText = text;
   $("#format-output").innerHTML = syntaxHighlight(text);
   $("#format-output-meta").textContent = `${text.split("\n").length} lines`;
   setFormatStatus(message, "success", value, text);
+
+  addHistory({
+    tool: "formatter",
+    action: historyAction,
+    input: $("#format-input").value,
+    output: text
+  });
 }
 
 function formatterAction(action) {
@@ -104,8 +127,8 @@ function formatterAction(action) {
       application: "JSON Tools",
       version: 1,
       active: true,
-      features: ["format", "escape", "compare"],
-      config: { theme: "dark", privacy: "local" }
+      features: ["format", "escape", "compare", "history"],
+      config: { theme: "dark", privacy: "local", historyLimit: 20 }
     });
     updateFormatterMeta();
     formatterAction("format");
@@ -125,6 +148,7 @@ function formatterAction(action) {
 
   if (action === "copy") {
     if (!state.formattedText) return showToast("Nothing to copy");
+
     navigator.clipboard.writeText(state.formattedText)
       .then(() => showToast("Copied output"))
       .catch(() => showToast("Copy failed"));
@@ -133,6 +157,7 @@ function formatterAction(action) {
 
   if (action === "download") {
     if (!state.formattedText) return showToast("Nothing to download");
+
     const blob = new Blob([state.formattedText], { type: "application/json" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
@@ -147,24 +172,24 @@ function formatterAction(action) {
     const value = parseJsonInput(input);
 
     if (action === "validate") {
-      renderFormatOutput(JSON.stringify(value, null, 2), value, "Valid JSON");
+      renderFormatOutput(JSON.stringify(value, null, 2), value, "Valid JSON", "Validate");
       return;
     }
 
     if (action === "minify") {
-      renderFormatOutput(JSON.stringify(value), value, "JSON minified");
+      renderFormatOutput(JSON.stringify(value), value, "JSON minified", "Minify");
       return;
     }
 
     if (action === "sort") {
       const sorted = sortDeep(value);
-      renderFormatOutput(JSON.stringify(sorted, null, 2), sorted, "Keys sorted");
+      renderFormatOutput(JSON.stringify(sorted, null, 2), sorted, "Keys sorted", "Sort keys");
       return;
     }
 
-    renderFormatOutput(JSON.stringify(value, null, 2), value, "JSON formatted");
+    renderFormatOutput(JSON.stringify(value, null, 2), value, "JSON formatted", "Format");
   } catch (error) {
-    $("#format-output").innerHTML = `<span class="json-null">${escapeHtml(error.message)}</span>`;
+    $("#format-output").innerHTML = `<span class="error-text">${escapeHtml(error.message)}</span>`;
     $("#format-output-meta").textContent = "Invalid JSON";
     state.formattedText = "";
     setFormatStatus(error.message, "error");
@@ -177,7 +202,6 @@ function updateFormatterMeta() {
 }
 
 function escapeText(text) {
-  // JSON.stringify implements all standard JSON string escapes.
   return JSON.stringify(text).slice(1, -1);
 }
 
@@ -200,41 +224,16 @@ function unescapeText(text) {
     const escaped = text[index + 1];
 
     switch (escaped) {
-      case "b":
-        result += "\b";
-        index += 1;
-        break;
-      case "f":
-        result += "\f";
-        index += 1;
-        break;
-      case "n":
-        result += "\n";
-        index += 1;
-        break;
-      case "r":
-        result += "\r";
-        index += 1;
-        break;
-      case "t":
-        result += "\t";
-        index += 1;
-        break;
-      case '"':
-        result += '"';
-        index += 1;
-        break;
-      case "\\":
-        result += "\\";
-        index += 1;
-        break;
-      case "/":
-        result += "/";
-        index += 1;
-        break;
+      case "b": result += "\b"; index += 1; break;
+      case "f": result += "\f"; index += 1; break;
+      case "n": result += "\n"; index += 1; break;
+      case "r": result += "\r"; index += 1; break;
+      case "t": result += "\t"; index += 1; break;
+      case '"': result += '"'; index += 1; break;
+      case "\\": result += "\\"; index += 1; break;
+      case "/": result += "/"; index += 1; break;
       case "u": {
         const hex = text.slice(index + 2, index + 6);
-
         if (/^[0-9a-fA-F]{4}$/.test(hex)) {
           result += String.fromCharCode(Number.parseInt(hex, 16));
           index += 5;
@@ -245,7 +244,6 @@ function unescapeText(text) {
         break;
       }
       default:
-        // Unknown sequences such as \x are preserved unchanged.
         result += `\\${escaped}`;
         index += 1;
         break;
@@ -274,8 +272,6 @@ function decodeEscapedJsonLayer(text) {
 
     const next = value[index + 1];
 
-    // Decode only the wrapper layer. Keep \n, \t, \r, \uXXXX, and unknown
-    // sequences intact so JSON.parse receives valid JSON escape text.
     if (next === '"') {
       result += '"';
       index += 1;
@@ -303,11 +299,7 @@ function repairJsonText(text, aggressive = false) {
 
     if (!insideString) {
       result += character;
-
-      if (character === '"') {
-        insideString = true;
-      }
-
+      if (character === '"') insideString = true;
       continue;
     }
 
@@ -320,15 +312,14 @@ function repairJsonText(text, aggressive = false) {
     const code = character.charCodeAt(0);
 
     if (code <= 0x1f) {
-      const escapedControlCharacters = {
+      const replacements = {
         8: "\\b",
         9: "\\t",
         10: "\\n",
         12: "\\f",
         13: "\\r"
       };
-
-      result += escapedControlCharacters[code] ?? `\\u${code.toString(16).padStart(4, "0")}`;
+      result += replacements[code] ?? `\\u${code.toString(16).padStart(4, "0")}`;
       continue;
     }
 
@@ -352,7 +343,6 @@ function repairJsonText(text, aggressive = false) {
 
     if (next === "u") {
       const hex = text.slice(index + 2, index + 6);
-
       if (/^[0-9a-fA-F]{4}$/.test(hex)) {
         result += `\\u${hex}`;
         index += 5;
@@ -360,19 +350,17 @@ function repairJsonText(text, aggressive = false) {
         result += "\\\\u";
         index += 1;
       }
-
       continue;
     }
 
-    const isStandardEscape = ["b", "f", "n", "r", "t"].includes(next);
+    const standardEscape = ["b", "f", "n", "r", "t"].includes(next);
 
-    if (isStandardEscape && !aggressive) {
+    if (standardEscape && !aggressive) {
       result += `\\${next}`;
       index += 1;
       continue;
     }
 
-    // Invalid or suspicious single backslash: preserve it as literal text.
     result += `\\\\${next}`;
     index += 1;
   }
@@ -381,12 +369,7 @@ function repairJsonText(text, aggressive = false) {
 }
 
 function parseJsonWithRepairs(text) {
-  const variants = [
-    text,
-    repairJsonText(text, false),
-    repairJsonText(text, true)
-  ];
-
+  const variants = [text, repairJsonText(text, false), repairJsonText(text, true)];
   let lastError = null;
 
   for (const variant of [...new Set(variants)]) {
@@ -405,11 +388,7 @@ function tryParseJsonDocument(candidate) {
 
   for (let depth = 0; depth < 4 && typeof parsed === "string"; depth += 1) {
     const nested = parsed.trim();
-
-    if (!(nested.startsWith("{") || nested.startsWith("["))) {
-      break;
-    }
-
+    if (!(nested.startsWith("{") || nested.startsWith("["))) break;
     parsed = parseJsonWithRepairs(nested);
   }
 
@@ -422,18 +401,11 @@ function tryParseJsonDocument(candidate) {
 
 function parseQuickFormatJson(text) {
   const rawValue = text.trim();
+  if (!rawValue) throw new Error("There is no JSON to format.");
 
-  if (!rawValue) {
-    throw new Error("There is no JSON to format.");
-  }
-
-  const candidates = new Set();
-  candidates.add(rawValue);
-
+  const candidates = new Set([rawValue]);
   let decoded = rawValue;
 
-  // Add several wrapper-decoded forms because copied logs can be escaped
-  // more than once.
   for (let depth = 0; depth < 4; depth += 1) {
     decoded = decodeEscapedJsonLayer(decoded);
     candidates.add(decoded);
@@ -457,12 +429,14 @@ function parseQuickFormatJson(text) {
 function escapeAction(action) {
   const input = $("#escape-input");
   const output = $("#escape-output");
+  let shouldSave = false;
+  let historyLabel = "";
 
   if (action === "clear") {
     input.value = "";
     output.value = "";
   } else if (action === "sample") {
-    input.value = "First line\nSecond line\tTabbed\nQuote: \"Hello\"\nPath: C:\\Tools\\json";
+    input.value = 'First line\nSecond line\tTabbed\nQuote: "Hello"\nPath: C:\\Tools\\json';
     output.value = "";
   } else if (action === "swap") {
     [input.value, output.value] = [output.value, input.value];
@@ -477,6 +451,7 @@ function escapeAction(action) {
     return;
   } else if (action === "copy") {
     if (!output.value) return showToast("Nothing to copy");
+
     navigator.clipboard.writeText(output.value)
       .then(() => showToast("Copied output"))
       .catch(() => showToast("Copy failed"));
@@ -487,6 +462,8 @@ function escapeAction(action) {
     try {
       const parsed = parseQuickFormatJson(sourceValue);
       output.value = JSON.stringify(parsed, null, 2);
+      shouldSave = true;
+      historyLabel = "Quick format";
       showToast("JSON formatted in output");
     } catch (error) {
       output.value = `Format error: ${error.message}`;
@@ -494,29 +471,42 @@ function escapeAction(action) {
     }
   } else if (action === "escape") {
     output.value = escapeText(input.value);
+    shouldSave = true;
+    historyLabel = "Escape";
   } else if (action === "stringify") {
     output.value = JSON.stringify(input.value);
+    shouldSave = true;
+    historyLabel = "JSON string literal";
   } else if (action === "unescape") {
     const rawValue = input.value;
     const trimmedValue = rawValue.trim();
 
-    // Unescape is intentionally tolerant. A fully quoted value has only its
-    // outer quotes removed; supported escape sequences are decoded and
-    // unknown sequences such as \p or \T are preserved instead of throwing.
-    if (trimmedValue.length >= 2 && trimmedValue.startsWith('"') && trimmedValue.endsWith('"')) {
-      output.value = unescapeText(trimmedValue.slice(1, -1));
-    } else {
-      output.value = unescapeText(rawValue);
-    }
+    output.value = trimmedValue.length >= 2 && trimmedValue.startsWith('"') && trimmedValue.endsWith('"')
+      ? unescapeText(trimmedValue.slice(1, -1))
+      : unescapeText(rawValue);
+
+    shouldSave = true;
+    historyLabel = "Unescape";
   }
 
   updateEscapeMeta();
+
+  if (shouldSave && output.value && !output.value.startsWith("Format error:")) {
+    addHistory({
+      tool: "escape",
+      action: historyLabel,
+      input: input.value,
+      output: output.value
+    });
+  }
 }
 
 function updateEscapeMeta() {
   $("#escape-input-meta").textContent = `${$("#escape-input").value.length.toLocaleString()} characters`;
   const outputLength = $("#escape-output").value.length;
-  $("#escape-output-meta").textContent = outputLength ? `${outputLength.toLocaleString()} characters` : "Waiting for input";
+  $("#escape-output-meta").textContent = outputLength
+    ? `${outputLength.toLocaleString()} characters`
+    : "Waiting for input";
 }
 
 function isObject(value) {
@@ -534,14 +524,12 @@ function stablePrimitiveArray(value) {
 }
 
 function compareJson(left, right, options, path = "$", differences = []) {
-  const mode = options.mode;
-  const matchKey = options.matchKey;
+  const { mode, matchKey, ignoreArrayOrder } = options;
 
   if (Array.isArray(left) && Array.isArray(right)) {
-    const canMatchByKey =
-      matchKey &&
-      left.every((item) => isObject(item) && Object.hasOwn(item, matchKey)) &&
-      right.every((item) => isObject(item) && Object.hasOwn(item, matchKey));
+    const canMatchByKey = matchKey
+      && left.every((item) => isObject(item) && Object.hasOwn(item, matchKey))
+      && right.every((item) => isObject(item) && Object.hasOwn(item, matchKey));
 
     if (canMatchByKey) {
       const leftMap = new Map(left.map((item) => [String(item[matchKey]), item]));
@@ -550,6 +538,7 @@ function compareJson(left, right, options, path = "$", differences = []) {
 
       [...ids].sort().forEach((id) => {
         const childPath = `${path}[${matchKey}=${JSON.stringify(id)}]`;
+
         if (!rightMap.has(id)) {
           differences.push({ kind: "left-only", path: childPath, left: leftMap.get(id), right: undefined });
         } else if (!leftMap.has(id)) {
@@ -558,25 +547,30 @@ function compareJson(left, right, options, path = "$", differences = []) {
           compareJson(leftMap.get(id), rightMap.get(id), options, childPath, differences);
         }
       });
+
       return differences;
     }
 
     if (
-      options.ignoreArrayOrder &&
-      left.every((item) => !isObject(item) && !Array.isArray(item)) &&
-      right.every((item) => !isObject(item) && !Array.isArray(item))
+      ignoreArrayOrder
+      && left.every((item) => !isObject(item) && !Array.isArray(item))
+      && right.every((item) => !isObject(item) && !Array.isArray(item))
     ) {
       const leftSorted = stablePrimitiveArray(left);
       const rightSorted = stablePrimitiveArray(right);
+
       if (JSON.stringify(leftSorted) !== JSON.stringify(rightSorted) && mode === "values") {
         differences.push({ kind: "changed", path, left, right });
       }
+
       return differences;
     }
 
-    const max = Math.max(left.length, right.length);
-    for (let index = 0; index < max; index += 1) {
+    const maximumLength = Math.max(left.length, right.length);
+
+    for (let index = 0; index < maximumLength; index += 1) {
       const childPath = `${path}[${index}]`;
+
       if (index >= right.length) {
         differences.push({ kind: "left-only", path: childPath, left: left[index], right: undefined });
       } else if (index >= left.length) {
@@ -585,11 +579,13 @@ function compareJson(left, right, options, path = "$", differences = []) {
         compareJson(left[index], right[index], options, childPath, differences);
       }
     }
+
     return differences;
   }
 
   if (isObject(left) && isObject(right)) {
     const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+
     [...keys].sort().forEach((key) => {
       const childPath = /^[A-Za-z_$][\w$]*$/.test(key)
         ? `${path}.${key}`
@@ -603,38 +599,41 @@ function compareJson(left, right, options, path = "$", differences = []) {
         compareJson(left[key], right[key], options, childPath, differences);
       }
     });
+
     return differences;
   }
 
   if (mode === "keys") {
-    const leftIsStructured = Array.isArray(left) || isObject(left);
-    const rightIsStructured = Array.isArray(right) || isObject(right);
-    if (leftIsStructured !== rightIsStructured || Array.isArray(left) !== Array.isArray(right)) {
+    const leftStructured = Array.isArray(left) || isObject(left);
+    const rightStructured = Array.isArray(right) || isObject(right);
+
+    if (leftStructured !== rightStructured || Array.isArray(left) !== Array.isArray(right)) {
       differences.push({ kind: "changed", path, left, right });
     }
+
     return differences;
   }
 
-  const equal = Object.is(left, right);
-  if (!equal) differences.push({ kind: "changed", path, left, right });
+  if (!Object.is(left, right)) {
+    differences.push({ kind: "changed", path, left, right });
+  }
+
   return differences;
 }
 
 function renderDifferences(differences) {
-  const counts = {
-    changed: differences.filter((item) => item.kind === "changed").length,
-    leftOnly: differences.filter((item) => item.kind === "left-only").length,
-    rightOnly: differences.filter((item) => item.kind === "right-only").length
-  };
+  const changed = differences.filter((item) => item.kind === "changed").length;
+  const leftOnly = differences.filter((item) => item.kind === "left-only").length;
+  const rightOnly = differences.filter((item) => item.kind === "right-only").length;
 
-  $("#changed-count").textContent = counts.changed;
-  $("#left-only-count").textContent = counts.leftOnly;
-  $("#right-only-count").textContent = counts.rightOnly;
+  $("#changed-count").textContent = changed;
+  $("#left-only-count").textContent = leftOnly;
+  $("#right-only-count").textContent = rightOnly;
 
   const list = $("#diff-list");
 
   if (!differences.length) {
-    list.innerHTML = '<div class="empty-state">The JSON documents match for the selected comparison mode.</div>';
+    list.innerHTML = '<div class="empty-state success-state">The JSON documents match for the selected comparison mode.</div>';
     $("#comparison-summary").textContent = "No differences found.";
     state.comparisonText = "No differences found.";
     return;
@@ -643,32 +642,58 @@ function renderDifferences(differences) {
   $("#comparison-summary").textContent = `${differences.length} difference${differences.length === 1 ? "" : "s"} found.`;
 
   list.innerHTML = differences.map((item) => `
-    <article class="diff-item ${item.kind}">
-      <span class="diff-kind">${item.kind.replace("-", " ")}</span>
-      <code class="diff-path">${escapeHtml(item.path)}</code>
-      <code class="diff-value left">${escapeHtml(printable(item.left))}</code>
-      <code class="diff-value right">${escapeHtml(printable(item.right))}</code>
+    <article class="diff-item" data-kind="${escapeHtml(item.kind)}">
+      <div class="diff-item-heading">
+        <span class="diff-kind">${escapeHtml(item.kind.replace("-", " "))}</span>
+        <code class="diff-path" title="${escapeHtml(item.path)}">${escapeHtml(item.path)}</code>
+      </div>
+      <div class="diff-values">
+        <div class="diff-value">
+          <span>Left</span>
+          <pre>${escapeHtml(printable(item.left))}</pre>
+        </div>
+        <div class="diff-value">
+          <span>Right</span>
+          <pre>${escapeHtml(printable(item.right))}</pre>
+        </div>
+      </div>
     </article>
   `).join("");
 
-  state.comparisonText = differences.map((item) =>
+  state.comparisonText = differences.map((item) => (
     `${item.kind.toUpperCase()} ${item.path}\nLEFT: ${printable(item.left)}\nRIGHT: ${printable(item.right)}`
-  ).join("\n\n");
+  )).join("\n\n");
 }
 
-function runComparison() {
+function runComparison(saveHistory = true) {
   try {
-    const left = parseJsonInput($("#left-json").value);
-    const right = parseJsonInput($("#right-json").value);
-    const differences = compareJson(left, right, {
+    const leftText = $("#left-json").value;
+    const rightText = $("#right-json").value;
+    const left = parseJsonInput(leftText);
+    const right = parseJsonInput(rightText);
+    const options = {
       mode: $("#compare-mode").value,
       matchKey: $("#match-key").value.trim(),
       ignoreArrayOrder: $("#ignore-array-order").checked
-    });
+    };
+
+    const differences = compareJson(left, right, options);
     renderDifferences(differences);
+
+    if (saveHistory) {
+      addHistory({
+        tool: "compare",
+        action: options.mode === "keys" ? "Keys only" : "Keys and values",
+        input: leftText,
+        secondaryInput: rightText,
+        output: state.comparisonText,
+        options
+      });
+    }
   } catch (error) {
     $("#comparison-summary").textContent = error.message;
-    $("#diff-list").innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    $("#diff-list").innerHTML = `<div class="empty-state error-text">${escapeHtml(error.message)}</div>`;
+    state.comparisonText = "";
     showToast("Comparison failed: invalid JSON");
   }
 }
@@ -697,30 +722,189 @@ function loadCompareSample(side) {
   updateCompareMeta();
 }
 
+function updateCompareMeta() {
+  $("#left-meta").textContent = `${$("#left-json").value.length.toLocaleString()} characters`;
+  $("#right-meta").textContent = `${$("#right-json").value.length.toLocaleString()} characters`;
+}
+
+function readHistory() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HISTORY_STORAGE_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.slice(0, HISTORY_LIMIT) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistoryItems(items) {
+  try {
+    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(items.slice(0, HISTORY_LIMIT)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createHistoryId() {
+  if (globalThis.crypto?.randomUUID) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function addHistory(entry) {
+  if (state.suppressHistory || !entry.output) return;
+
+  const existingItems = readHistory();
+  const newItem = {
+    id: createHistoryId(),
+    createdAt: new Date().toISOString(),
+    ...entry
+  };
+
+  const candidate = [newItem, ...existingItems].slice(0, HISTORY_LIMIT);
+  let saved = false;
+
+  while (candidate.length) {
+    if (saveHistoryItems(candidate)) {
+      saved = candidate[0]?.id === newItem.id;
+      break;
+    }
+    candidate.pop();
+  }
+
+  if (!saved) {
+    saveHistoryItems(existingItems);
+    showToast("This result is too large to save in browser history");
+  }
+
+  renderHistory();
+}
+
+function historyToolLabel(tool) {
+  if (tool === "formatter") return "Formatter";
+  if (tool === "escape") return "Escape / Unescape";
+  if (tool === "compare") return "Compare";
+  return tool;
+}
+
+function formatHistoryDate(isoDate) {
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return "";
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(date);
+}
+
+function historyPreview(text, maximumLength = 300) {
+  const compact = String(text).replace(/\s+/g, " ").trim();
+  return compact.length > maximumLength ? `${compact.slice(0, maximumLength)}…` : compact;
+}
+
+function renderHistory() {
+  const list = $("#history-list");
+  const count = $("#history-count");
+  const tabCount = $("#history-tab-count");
+  const items = readHistory();
+
+  count.textContent = `${items.length} of ${HISTORY_LIMIT} saved locally`;
+  tabCount.textContent = items.length;
+
+  if (!items.length) {
+    list.innerHTML = '<div class="empty-state">No history yet. Successful results will appear here.</div>';
+    return;
+  }
+
+  list.innerHTML = items.map((item) => `
+    <article class="history-item">
+      <div class="history-item-heading">
+        <div>
+          <span class="history-tool">${escapeHtml(historyToolLabel(item.tool))}</span>
+          <strong>${escapeHtml(item.action)}</strong>
+        </div>
+        <time datetime="${escapeHtml(item.createdAt)}">${escapeHtml(formatHistoryDate(item.createdAt))}</time>
+      </div>
+      <pre class="history-preview">${escapeHtml(historyPreview(item.output))}</pre>
+      <div class="history-actions">
+        <button class="mini-action" type="button" data-history-action="restore" data-history-id="${escapeHtml(item.id)}">Restore</button>
+        <button class="mini-action" type="button" data-history-action="copy" data-history-id="${escapeHtml(item.id)}">Copy output</button>
+        <button class="mini-action danger" type="button" data-history-action="delete" data-history-id="${escapeHtml(item.id)}">Delete</button>
+      </div>
+    </article>
+  `).join("");
+}
+
+function restoreFormatterHistory(item) {
+  $("#format-input").value = item.input ?? "";
+  state.formattedText = item.output ?? "";
+  $("#format-output").innerHTML = syntaxHighlight(state.formattedText);
+  $("#format-output-meta").textContent = `${state.formattedText.split("\n").length} lines`;
+  updateFormatterMeta();
+
+  let parsedValue = null;
+  try {
+    parsedValue = JSON.parse(state.formattedText);
+  } catch {
+    // The saved output can still be restored even if it is no longer valid JSON.
+  }
+
+  setFormatStatus(`Restored: ${item.action}`, "success", parsedValue, state.formattedText);
+}
+
+function restoreEscapeHistory(item) {
+  $("#escape-input").value = item.input ?? "";
+  $("#escape-output").value = item.output ?? "";
+  updateEscapeMeta();
+}
+
+function restoreCompareHistory(item) {
+  $("#left-json").value = item.input ?? "";
+  $("#right-json").value = item.secondaryInput ?? "";
+  $("#compare-mode").value = item.options?.mode ?? "values";
+  $("#match-key").value = item.options?.matchKey ?? "";
+  $("#ignore-array-order").checked = Boolean(item.options?.ignoreArrayOrder);
+  updateCompareMeta();
+  runComparison(false);
+}
+
+function restoreHistoryItem(item) {
+  state.suppressHistory = true;
+
+  try {
+    if (item.tool === "formatter") restoreFormatterHistory(item);
+    if (item.tool === "escape") restoreEscapeHistory(item);
+    if (item.tool === "compare") restoreCompareHistory(item);
+    activateTab(item.tool);
+    showToast("History result restored");
+  } catch (error) {
+    showToast(`Could not restore result: ${error.message}`);
+  } finally {
+    state.suppressHistory = false;
+  }
+}
+
 $$(".tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    $$(".tab").forEach((item) => item.classList.remove("active"));
-    $$(".tool-panel").forEach((panel) => panel.classList.remove("active"));
-    tab.classList.add("active");
-    $(`#${tab.dataset.tab}-panel`).classList.add("active");
-  });
+  tab.addEventListener("click", () => activateTab(tab.dataset.tab));
 });
 
-$$("[data-format-action]").forEach((button) => {
+$$('[data-format-action]').forEach((button) => {
   button.addEventListener("click", () => formatterAction(button.dataset.formatAction));
 });
 
-$$("[data-escape-action]").forEach((button) => {
+$$('[data-escape-action]').forEach((button) => {
   button.addEventListener("click", () => escapeAction(button.dataset.escapeAction));
 });
 
-$$("[data-compare-action]").forEach((button) => {
+$$('[data-compare-action]').forEach((button) => {
   button.addEventListener("click", () => {
     const action = button.dataset.compareAction;
+
     if (action === "left-sample") loadCompareSample("left");
     if (action === "right-sample") loadCompareSample("right");
+
     if (action === "copy-result") {
       if (!state.comparisonText) return showToast("No comparison result to copy");
+
       navigator.clipboard.writeText(state.comparisonText)
         .then(() => showToast("Copied comparison result"))
         .catch(() => showToast("Copy failed"));
@@ -728,23 +912,61 @@ $$("[data-compare-action]").forEach((button) => {
   });
 });
 
-$("#compare-button").addEventListener("click", runComparison);
+$("#compare-button").addEventListener("click", () => runComparison(true));
 $("#format-input").addEventListener("input", updateFormatterMeta);
 $("#escape-input").addEventListener("input", updateEscapeMeta);
 $("#left-json").addEventListener("input", updateCompareMeta);
 $("#right-json").addEventListener("input", updateCompareMeta);
 
-function updateCompareMeta() {
-  $("#left-meta").textContent = `${$("#left-json").value.length.toLocaleString()} characters`;
-  $("#right-meta").textContent = `${$("#right-json").value.length.toLocaleString()} characters`;
-}
+$("#history-list").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-history-action]");
+  if (!button) return;
+
+  const items = readHistory();
+  const item = items.find((historyItem) => historyItem.id === button.dataset.historyId);
+  if (!item) return;
+
+  const action = button.dataset.historyAction;
+
+  if (action === "restore") {
+    restoreHistoryItem(item);
+    return;
+  }
+
+  if (action === "copy") {
+    navigator.clipboard.writeText(item.output)
+      .then(() => showToast("Copied history output"))
+      .catch(() => showToast("Copy failed"));
+    return;
+  }
+
+  if (action === "delete") {
+    saveHistoryItems(items.filter((historyItem) => historyItem.id !== item.id));
+    renderHistory();
+    showToast("History item deleted");
+  }
+});
+
+$("#clear-history").addEventListener("click", () => {
+  try {
+    localStorage.removeItem(HISTORY_STORAGE_KEY);
+  } catch {
+    // Browser storage may be disabled.
+  }
+
+  renderHistory();
+  showToast("History cleared");
+});
 
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
     event.preventDefault();
-    const activeTab = $(".tab.active").dataset.tab;
+    const activeTab = $(".tab.active")?.dataset.tab;
+
     if (activeTab === "formatter") formatterAction("format");
-    if (activeTab === "compare") runComparison();
+    if (activeTab === "compare") runComparison(true);
     if (activeTab === "escape") escapeAction("escape");
   }
 });
+
+renderHistory();
