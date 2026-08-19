@@ -9,8 +9,8 @@
   />
   <meta name="theme-color" content="#080c18" />
   <title>JSON Tools</title>
-  <link rel="stylesheet" href="style.css?v=history-20260716-2" />
-  <script defer src="script.js?v=history-20260716-2"></script>
+  <link rel="stylesheet" href="style.css?v=modal-20260819-1" />
+  <script defer src="script.js?v=modal-20260819-1"></script>
 </head>
 <body>
   <div class="background-grid" aria-hidden="true"></div>
@@ -115,7 +115,10 @@
           <article class="editor-card">
             <div class="editor-heading">
               <div><strong>Input</strong><span id="escape-input-meta">0 characters</span></div>
-              <button class="mini-action" type="button" data-escape-action="paste">Paste</button>
+              <div class="heading-actions">
+                <button class="mini-action" type="button" data-escape-action="preview-input">Preview</button>
+                <button class="mini-action" type="button" data-escape-action="paste">Paste</button>
+              </div>
             </div>
             <textarea id="escape-input" spellcheck="false" placeholder='Example: {"message":"Hello\nworld"}'></textarea>
           </article>
@@ -124,11 +127,12 @@
             <div class="editor-heading">
               <div><strong>Output</strong><span id="escape-output-meta">Waiting for input</span></div>
               <div class="heading-actions">
+                <button class="mini-action" type="button" data-escape-action="preview">Preview</button>
                 <button class="mini-action quick-format-action" type="button" data-escape-action="quick-format">Quick format</button>
                 <button class="mini-action" type="button" data-escape-action="copy">Copy</button>
               </div>
             </div>
-            <textarea id="escape-output" spellcheck="false" readonly placeholder="Result will appear here…"></textarea>
+            <textarea id="escape-output" spellcheck="false" readonly title="Click to open in a larger preview" placeholder="Result will appear here…"></textarea>
           </article>
         </div>
 
@@ -242,6 +246,26 @@
       <div><strong>Portable</strong><span>Plain HTML, CSS and JavaScript.</span></div>
     </section>
   </main>
+
+  <div class="json-modal" id="json-modal" hidden>
+    <div class="json-modal-backdrop" data-modal-close></div>
+
+    <div class="json-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="json-modal-title">
+      <header class="json-modal-header">
+        <div>
+          <strong id="json-modal-title">Formatted JSON</strong>
+          <span id="json-modal-meta"></span>
+        </div>
+        <div class="heading-actions">
+          <button class="mini-action" type="button" data-modal-action="copy">Copy</button>
+          <button class="mini-action" type="button" data-modal-action="download">Download</button>
+          <button class="mini-action danger" type="button" data-modal-close aria-label="Close preview">Close</button>
+        </div>
+      </header>
+
+      <pre class="json-modal-body" id="json-modal-body" tabindex="0"></pre>
+    </div>
+  </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 

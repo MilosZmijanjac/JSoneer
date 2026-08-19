@@ -7,8 +7,12 @@ const HISTORY_LIMIT = 20;
 const state = {
   formattedText: "",
   comparisonText: "",
+  differences: [],
   toastTimer: null,
-  suppressHistory: false
+  suppressHistory: false,
+  modalText: "",
+  modalCloseTimer: null,
+  modalReturnFocus: null
 };
 
 function showToast(message) {
@@ -42,23 +46,23 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+const JSON_TOKEN_PATTERN = /(&quot;(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\])*?&quot;)(\s*:)?|\b(true|false)\b|\b(null)\b|(-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)|([{}[\],])/g;
+
 function syntaxHighlight(json) {
-  const escaped = escapeHtml(json);
-
-  return escaped.replace(
-    /(&quot;(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\])*?&quot;\s*:|&quot;(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\])*?&quot;|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)/g,
-    (match) => {
-      let className = "json-number";
-
-      if (match.startsWith("&quot;")) {
-        className = /:\s*$/.test(match) ? "json-key" : "json-string";
-      } else if (match === "true" || match === "false") {
-        className = "json-boolean";
-      } else if (match === "null") {
-        className = "json-null";
+  return escapeHtml(json).replace(
+    JSON_TOKEN_PATTERN,
+    (match, quoted, colon, boolean, nullish, number, punctuation) => {
+      if (quoted !== undefined) {
+        return colon === undefined
+          ? `<span class="json-string">${quoted}</span>`
+          : `<span class="json-key">${quoted}</span><span class="json-punct">${colon}</span>`;
       }
 
-      return `<span class="${className}">${match}</span>`;
+      if (boolean !== undefined) return `<span class="json-boolean">${boolean}</span>`;
+      if (nullish !== undefined) return `<span class="json-null">${nullish}</span>`;
+      if (number !== undefined) return `<span class="json-number">${number}</span>`;
+
+      return `<span class="json-punct">${punctuation}</span>`;
     }
   );
 }
@@ -98,6 +102,8 @@ function setFormatStatus(message, status = "idle", value = null, output = "") {
 function renderFormatOutput(text, value, message, historyAction) {
   state.formattedText = text;
   $("#format-output").innerHTML = syntaxHighlight(text);
+  $("#format-output").classList.add("expandable");
+  $("#format-output").title = "Click to open in a larger preview";
   $("#format-output-meta").textContent = `${text.split("\n").length} lines`;
   setFormatStatus(message, "success", value, text);
 
@@ -115,6 +121,7 @@ function formatterAction(action) {
   if (action === "clear") {
     $("#format-input").value = "";
     $("#format-output").innerHTML = '<span class="placeholder">Formatted JSON will appear here.</span>';
+    $("#format-output").classList.remove("expandable");
     $("#format-input-meta").textContent = "0 characters";
     $("#format-output-meta").textContent = "Waiting for JSON";
     state.formattedText = "";
@@ -190,6 +197,7 @@ function formatterAction(action) {
     renderFormatOutput(JSON.stringify(value, null, 2), value, "JSON formatted", "Format");
   } catch (error) {
     $("#format-output").innerHTML = `<span class="error-text">${escapeHtml(error.message)}</span>`;
+    $("#format-output").classList.remove("expandable");
     $("#format-output-meta").textContent = "Invalid JSON";
     state.formattedText = "";
     setFormatStatus(error.message, "error");
@@ -435,6 +443,16 @@ function escapeAction(action) {
   if (action === "clear") {
     input.value = "";
     output.value = "";
+  } else if (action === "preview") {
+    if (!output.value.trim()) return showToast("Nothing to preview");
+
+    openJsonModal(output.value, "Escape / Unescape · Output");
+    return;
+  } else if (action === "preview-input") {
+    if (!input.value.trim()) return showToast("Nothing to preview");
+
+    openJsonModal(input.value, "Escape / Unescape · Input");
+    return;
   } else if (action === "sample") {
     input.value = 'First line\nSecond line\tTabbed\nQuote: "Hello"\nPath: C:\\Tools\\json';
     output.value = "";
@@ -622,6 +640,7 @@ function compareJson(left, right, options, path = "$", differences = []) {
 }
 
 function renderDifferences(differences) {
+  state.differences = differences;
   const changed = differences.filter((item) => item.kind === "changed").length;
   const leftOnly = differences.filter((item) => item.kind === "left-only").length;
   const rightOnly = differences.filter((item) => item.kind === "right-only").length;
@@ -641,7 +660,7 @@ function renderDifferences(differences) {
 
   $("#comparison-summary").textContent = `${differences.length} difference${differences.length === 1 ? "" : "s"} found.`;
 
-  list.innerHTML = differences.map((item) => `
+  list.innerHTML = differences.map((item, index) => `
     <article class="diff-item" data-kind="${escapeHtml(item.kind)}">
       <div class="diff-item-heading">
         <span class="diff-kind">${escapeHtml(item.kind.replace("-", " "))}</span>
@@ -650,11 +669,11 @@ function renderDifferences(differences) {
       <div class="diff-values">
         <div class="diff-value">
           <span>Left</span>
-          <pre>${escapeHtml(printable(item.left))}</pre>
+          <pre role="button" tabindex="0" title="Click to open in a larger preview" data-diff-view data-diff-index="${index}" data-diff-side="left">${escapeHtml(printable(item.left))}</pre>
         </div>
         <div class="diff-value">
           <span>Right</span>
-          <pre>${escapeHtml(printable(item.right))}</pre>
+          <pre role="button" tabindex="0" title="Click to open in a larger preview" data-diff-view data-diff-index="${index}" data-diff-side="right">${escapeHtml(printable(item.right))}</pre>
         </div>
       </div>
     </article>
@@ -824,8 +843,9 @@ function renderHistory() {
         </div>
         <time datetime="${escapeHtml(item.createdAt)}">${escapeHtml(formatHistoryDate(item.createdAt))}</time>
       </div>
-      <pre class="history-preview">${escapeHtml(historyPreview(item.output))}</pre>
+      <pre class="history-preview" role="button" tabindex="0" title="Click to open in a larger preview" data-history-action="view" data-history-id="${escapeHtml(item.id)}">${escapeHtml(historyPreview(item.output))}</pre>
       <div class="history-actions">
+        <button class="mini-action" type="button" data-history-action="view" data-history-id="${escapeHtml(item.id)}">View</button>
         <button class="mini-action" type="button" data-history-action="restore" data-history-id="${escapeHtml(item.id)}">Restore</button>
         <button class="mini-action" type="button" data-history-action="copy" data-history-id="${escapeHtml(item.id)}">Copy output</button>
         <button class="mini-action danger" type="button" data-history-action="delete" data-history-id="${escapeHtml(item.id)}">Delete</button>
@@ -838,6 +858,7 @@ function restoreFormatterHistory(item) {
   $("#format-input").value = item.input ?? "";
   state.formattedText = item.output ?? "";
   $("#format-output").innerHTML = syntaxHighlight(state.formattedText);
+  $("#format-output").classList.toggle("expandable", Boolean(state.formattedText));
   $("#format-output-meta").textContent = `${state.formattedText.split("\n").length} lines`;
   updateFormatterMeta();
 
@@ -883,6 +904,156 @@ function restoreHistoryItem(item) {
   }
 }
 
+function prettyPrintJson(text) {
+  const source = String(text ?? "");
+
+  let value;
+
+  try {
+    value = JSON.parse(source);
+  } catch {
+    // Escape output such as {\"a\":1} is not valid JSON on its own, but the
+    // decoded form usually is, so try one unescape pass before giving up.
+    if (source.includes("\\")) {
+      try {
+        const decoded = JSON.parse(unescapeText(source.trim()));
+
+        if (decoded && typeof decoded === "object") {
+          return { text: JSON.stringify(decoded, null, 2), isJson: true, unwrapped: true };
+        }
+      } catch {
+        // Not escaped JSON either.
+      }
+    }
+
+    return { text: source, isJson: false };
+  }
+
+  // A JSON string literal often wraps a whole escaped document, e.g. "{\"a\":1}".
+  // Unwrap one layer so the real structure gets highlighted instead of one long line.
+  if (typeof value === "string") {
+    try {
+      const inner = JSON.parse(value);
+
+      if (inner && typeof inner === "object") {
+        return { text: JSON.stringify(inner, null, 2), isJson: true, unwrapped: true };
+      }
+    } catch {
+      // Not a nested document, fall through and show the raw string instead.
+    }
+
+    return { text: value, isJson: false };
+  }
+
+  return { text: JSON.stringify(value, null, 2), isJson: true, unwrapped: false };
+}
+
+function hasTextSelection() {
+  return Boolean(window.getSelection()?.toString().trim());
+}
+
+function openJsonModal(text, title = "Formatted JSON") {
+  if (!String(text ?? "").trim()) return showToast("Nothing to preview");
+
+  const { text: pretty, isJson, unwrapped } = prettyPrintJson(text);
+  const modal = $("#json-modal");
+
+  state.modalText = pretty;
+  state.modalReturnFocus = document.activeElement;
+
+  $("#json-modal-title").textContent = title;
+  $("#json-modal-meta").textContent = isJson
+    ? `${pretty.split("\n").length} lines · ${byteSize(pretty)}${unwrapped ? " · unescaped for preview" : ""}`
+    : `Plain text · ${byteSize(pretty)}`;
+  $("#json-modal-body").innerHTML = isJson ? syntaxHighlight(pretty) : escapeHtml(pretty);
+
+  clearTimeout(state.modalCloseTimer);
+  modal.hidden = false;
+  document.body.classList.add("modal-open");
+  requestAnimationFrame(() => modal.classList.add("visible"));
+  $("#json-modal-body").scrollTop = 0;
+  $("#json-modal-body").focus();
+}
+
+function closeJsonModal() {
+  const modal = $("#json-modal");
+  if (modal.hidden) return;
+
+  modal.classList.remove("visible");
+  document.body.classList.remove("modal-open");
+  state.modalCloseTimer = setTimeout(() => {
+    modal.hidden = true;
+  }, 170);
+
+  state.modalReturnFocus?.focus?.();
+  state.modalReturnFocus = null;
+}
+
+$("#json-modal").addEventListener("click", (event) => {
+  if (event.target.closest("[data-modal-close]")) {
+    closeJsonModal();
+    return;
+  }
+
+  const action = event.target.closest("[data-modal-action]")?.dataset.modalAction;
+
+  if (action === "copy") {
+    navigator.clipboard.writeText(state.modalText)
+      .then(() => showToast("Copied preview"))
+      .catch(() => showToast("Copy failed"));
+  }
+
+  if (action === "download") {
+    const blob = new Blob([state.modalText], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "preview.json";
+    link.click();
+    URL.revokeObjectURL(link.href);
+    showToast("Downloaded preview.json");
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeJsonModal();
+});
+
+$("#format-output").addEventListener("click", () => {
+  if (!state.formattedText || hasTextSelection()) return;
+  openJsonModal(state.formattedText, "Formatted JSON");
+});
+
+$("#diff-list").addEventListener("click", (event) => {
+  const target = event.target.closest("[data-diff-view]");
+  if (!target || hasTextSelection()) return;
+
+  const item = state.differences[Number(target.dataset.diffIndex)];
+  if (!item) return;
+
+  const side = target.dataset.diffSide;
+  const label = side === "left" ? "Left" : "Right";
+  openJsonModal(printable(item[side]), `${label} · ${item.path}`);
+});
+
+$("#escape-output").addEventListener("click", () => {
+  const value = $("#escape-output").value;
+  if (!value.trim() || hasTextSelection()) return;
+
+  openJsonModal(value, "Escape / Unescape · Output");
+});
+
+$$("#history-list, #diff-list").forEach((container) => {
+  container.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+
+    const target = event.target.closest('[role="button"][tabindex="0"]');
+    if (!target) return;
+
+    event.preventDefault();
+    target.click();
+  });
+});
+
 $$(".tab").forEach((tab) => {
   tab.addEventListener("click", () => activateTab(tab.dataset.tab));
 });
@@ -927,6 +1098,11 @@ $("#history-list").addEventListener("click", (event) => {
   if (!item) return;
 
   const action = button.dataset.historyAction;
+
+  if (action === "view") {
+    openJsonModal(item.output, `${historyToolLabel(item.tool)} · ${item.action}`);
+    return;
+  }
 
   if (action === "restore") {
     restoreHistoryItem(item);

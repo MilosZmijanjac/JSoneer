@@ -15,6 +15,12 @@
   --yellow: #ffd37d;
   --red: #ff8298;
   --purple: #c89fff;
+  --json-key: #6db3ff;
+  --json-string: #7ef0b8;
+  --json-number: #ffb45c;
+  --json-boolean: #d3a3ff;
+  --json-null: #ff7f97;
+  --json-punct: #6f7d95;
   --shadow: 0 30px 90px rgba(0, 0, 0, 0.34);
 }
 
@@ -424,23 +430,32 @@ textarea:focus,
 }
 
 .json-key {
-  color: var(--blue);
+  color: var(--json-key);
+  font-weight: 700;
 }
 
 .json-string {
-  color: var(--accent);
+  color: var(--json-string);
 }
 
 .json-number {
-  color: var(--yellow);
+  color: var(--json-number);
+  font-weight: 600;
 }
 
 .json-boolean {
-  color: var(--purple);
+  color: var(--json-boolean);
+  font-style: italic;
 }
 
 .json-null {
-  color: var(--red);
+  color: var(--json-null);
+  font-style: italic;
+  opacity: 0.9;
+}
+
+.json-punct {
+  color: var(--json-punct);
 }
 
 .status-bar {
@@ -825,6 +840,147 @@ footer {
 footer span:first-child {
   color: var(--muted-light);
   font-weight: 800;
+}
+
+/* ---------- Clickable JSON blocks ---------- */
+
+.code-output.expandable,
+.history-preview,
+#escape-output:not(:placeholder-shown),
+.diff-value pre[data-diff-view] {
+  cursor: zoom-in;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.code-output.expandable:hover {
+  background: rgba(114, 240, 192, 0.03);
+}
+
+.history-preview:hover,
+.diff-value pre[data-diff-view]:hover {
+  border-color: var(--border-strong);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.history-preview:focus-visible,
+.code-output.expandable:focus-visible,
+.diff-value pre[data-diff-view]:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- JSON preview modal ---------- */
+
+.json-modal[hidden] {
+  display: none;
+}
+
+.json-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.json-modal.visible {
+  opacity: 1;
+}
+
+.json-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 7, 15, 0.74);
+  backdrop-filter: blur(3px);
+}
+
+.json-modal-dialog {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  width: min(1080px, 100%);
+  max-height: min(86vh, 940px);
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--panel-strong);
+  box-shadow: var(--shadow);
+  transform: translateY(12px) scale(0.99);
+  transition: transform 160ms ease;
+}
+
+.json-modal.visible .json-modal-dialog {
+  transform: none;
+}
+
+.json-modal-header {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-soft);
+}
+
+.json-modal-header > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.json-modal-header strong {
+  font-size: 0.82rem;
+}
+
+.json-modal-header span {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.json-modal-body {
+  margin: 0;
+  padding: 20px 22px;
+  overflow: auto;
+  color: var(--muted-light);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.95rem;
+  line-height: 1.75;
+  tab-size: 2;
+  white-space: pre;
+  outline: 0;
+}
+
+body.modal-open {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .json-modal,
+  .json-modal-dialog {
+    transition: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .json-modal {
+    padding: 12px;
+  }
+
+  .json-modal-dialog {
+    max-height: 92vh;
+  }
+
+  .json-modal-body {
+    padding: 14px;
+    font-size: 0.82rem;
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
 }
 
 @media (max-width: 900px) {
